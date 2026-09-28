@@ -3,6 +3,7 @@
 #endif
 #include <windows.h>
 #include <dwmapi.h>
+#include <tlhelp32.h>
 #include <cmath>
 #include <cstdio>
 #include <string>
@@ -80,11 +81,41 @@ static bool findMinecraft(DWORD& pidOut) {
     return pi.pid != 0;
 }
 
+static bool is64BitProcess(HANDLE hProc) {
+    BOOL wow64 = TRUE;
+    IsWow64Process(hProc, &wow64);
+    return !wow64;   // not under WoW64 => 64-bit
+}
+
+// Verify the dll actually shows up in the target's module list.
+static bool dllLoadedIn(DWORD pid, const wchar_t* dllName) {
+    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, pid);
+    if (snap == INVALID_HANDLE_VALUE) return false;
+    bool found = false;
+    MODULEENTRY32W me{};
+    me.dwSize = sizeof(me);
+    if (Module32FirstW(snap, &me)) {
+        do {
+            if (_wcsicmp(me.szModule, dllName) == 0) { found = true; break; }
+        } while (Module32NextW(snap, &me));
+    }
+    CloseHandle(snap);
+    return found;
+}
+
 static bool inject(DWORD pid, const wstring& dllPath, wstring& err) {
     HANDLE hProc = OpenProcess(PROCESS_CREATE_THREAD | PROCESS_QUERY_INFORMATION |
                                PROCESS_VM_OPERATION | PROCESS_VM_WRITE | PROCESS_VM_READ,
                                FALSE, pid);
     if (!hProc) { err = L"OpenProcess failed (" + std::to_wstring(GetLastError()) + L")"; return false; }
+
+    if (!is64BitProcess(hProc)) {
+        err = L"game is 32-bit java — need 64-bit";
+        CloseHandle(hProc);
+        return false;
+    }
+
+    const wchar_t* dllName = dllPath.filename().c_str();
 
     SIZE_T size = (dllPath.size() + 1) * sizeof(wchar_t);
     LPVOID remote = VirtualAllocEx(hProc, nullptr, size, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
@@ -100,13 +131,31 @@ static bool inject(DWORD pid, const wstring& dllPath, wstring& err) {
 
     HANDLE th = CreateRemoteThread(hProc, nullptr, 0,
         reinterpret_cast<LPTHREAD_START_ROUTINE>(loadLib), remote, 0, nullptr);
-    if (!th) { err = L"CreateRemoteThread failed"; VirtualFreeEx(hProc, remote, 0, MEM_RELEASE); CloseHandle(hProc); return false; }
+    if (!th) {
+        DWORD e = GetLastError();
+        err = L"CreateRemoteThread failed (" + std::to_wstring(e) + L")";
+        VirtualFreeEx(hProc, remote, 0, MEM_RELEASE); CloseHandle(hProc); return false;
+    }
 
     WaitForSingleObject(th, 8000);
+    DWORD exitCode = 0;
+    GetExitCodeThread(th, &exitCode);
     CloseHandle(th);
     VirtualFreeEx(hProc, remote, 0, MEM_RELEASE);
     CloseHandle(hProc);
-    return true;
+
+    if (exitCode == 0) {
+        err = L"LoadLibraryW returned null — dll rejected (blocked by AV or bad file?)";
+        return false;
+    }
+
+    // Confirm the module actually mapped into the game.
+    for (int i = 0; i < 20; ++i) {
+        if (dllLoadedIn(pid, dllName)) return true;
+        Sleep(100);
+    }
+    err = L"dll did not appear in the game's module list";
+    return false;
 }
 
 // ---- GDI helpers: rounded rects, glow, text --------------------------------
@@ -284,7 +333,7 @@ static LRESULT CALLBACK btnProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                     wstring err;
                     if (inject(pid, dll.wstring(), err)) {
                         g_progress = 1.f;
-                        setStatus(L"injected — press Insert in game", 2);
+                        setStatus(L"injected — press Right Shift in game", 2);
                     } else {
                         setStatus((L"failed: " + err).c_str(), 3);
                     }

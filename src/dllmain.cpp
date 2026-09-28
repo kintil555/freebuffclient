@@ -26,7 +26,15 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID) {
             // Init in a detached thread: DllMain must not load opengl32 or
             // touch GLFW (loader lock).
             std::thread([hModule]() {
-                if (hooks::installRenderHook()) {
+                // opengl32.dll may not be loaded yet at attach time — retry
+                // for up to ~60s before giving up.
+                bool installed = false;
+                for (int i = 0; i < 60 && !g_ejectRequested; ++i) {
+                    if (hooks::installRenderHook()) { installed = true; break; }
+                    MH_Uninitialize();   // reset MinHook state between attempts
+                    Sleep(1000);
+                }
+                if (installed) {
                     // Idle pump: watch for eject request from the menu.
                     while (!g_ejectRequested) Sleep(120);
                     selfUnload();

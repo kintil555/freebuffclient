@@ -75,7 +75,9 @@ namespace hooks {
                              reinterpret_cast<LPVOID*>(&o_wglSwapBuffers)) != MH_OK) {
             return false;
         }
-        if (MH_EnableHook(reinterpret_cast<LPVOID>(&h_wglSwapBuffers)) != MH_OK) {
+        // Enable ALL created hooks (EnableHook must receive the original target
+        // or MH_ALL_HOOKS — passing our detour function is invalid and fails).
+        if (MH_EnableHook(MH_ALL_HOOKS) != MH_OK) {
             return false;
         }
         g_renderHookInstalled = true;
