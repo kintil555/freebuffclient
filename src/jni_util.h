@@ -275,6 +275,20 @@ namespace jni {
         return r;
     }
 
+    // One-argument object call (e.g. getAttribute(Holder)).
+    inline std::optional<jobject> callObjectArg(JNIEnv* env, jobject obj, const char* method,
+                                                const char* sig, jobject arg) {
+        if (!env || !obj) return std::nullopt;
+        jclass c = env->GetObjectClass(obj);
+        if (!c) return std::nullopt;
+        jmethodID m = env->GetMethodID(c, method, sig);
+        if (!m || env->ExceptionCheck()) { env->ExceptionClear(); env->DeleteLocalRef(c); return std::nullopt; }
+        jobject r = env->CallObjectMethod(obj, m, arg);
+        if (env->ExceptionCheck()) { env->ExceptionClear(); env->DeleteLocalRef(c); return std::nullopt; }
+        env->DeleteLocalRef(c);
+        return r;
+    }
+
     inline std::string jstringToStd(JNIEnv* env, jstring s) {
         if (!env || !s) return {};
         const char* c = env->GetStringUTFChars(s, nullptr);

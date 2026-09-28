@@ -325,7 +325,7 @@ namespace {
         if (!holderOpt || !*holderOpt) return;
         LocalRef holder(env, *holderOpt);
 
-        auto instOpt = callObject(env, player, "getAttribute", mc::M_getAttribute, *holder);
+        auto instOpt = callObjectArg(env, player, "getAttribute", mc::M_getAttribute, *holder);
         if (!instOpt || !*instOpt) return;
         LocalRef inst(env, *instOpt);
 
