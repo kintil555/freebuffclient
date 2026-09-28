@@ -20,9 +20,8 @@ add_library(imgui STATIC
     ${IMGUI_DIR}/backends/imgui_impl_win32.cpp
 )
 target_include_directories(imgui PUBLIC ${IMGUI_DIR} ${IMGUI_DIR}/backends)
-
-# GL headers: use the WGL loader shipped with ImGui's GL3 backend.
-target_compile_definitions(imgui PUBLIC IMGUI_IMPL_OPENGL_LOADER_CUSTOM=0)
+# NOTE: do NOT define IMGUI_IMPL_OPENGL_LOADER_CUSTOM — the backend's bundled
+# imgl3w loader provides all GL symbols (defining it skips the loader).
 
 # -------------------------------------------------------------- MinHook -----
 set(MH_DIR ${CMAKE_CURRENT_SOURCE_DIR}/vendor/minhook)
