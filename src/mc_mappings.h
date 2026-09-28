@@ -25,6 +25,9 @@ namespace mc {
     constexpr auto ClientPacketListener = "net/minecraft/client/multiplayer/ClientPacketListener";
     constexpr auto Component       = "net/minecraft/network/chat/Component";
     constexpr auto InteractionHand = "net/minecraft/world/InteractionHand";
+    constexpr auto Attributes      = "net/minecraft/world/entity/ai/attributes/Attributes";
+    constexpr auto AttributeInstance = "net/minecraft/world/entity/ai/attributes/AttributeInstance";
+    constexpr auto ServerPlayer    = "net/minecraft/server/level/ServerPlayer";
 
     // ---- Minecraft fields (public) ------------------------------------------
     // public ClientLevel level; public LocalPlayer player; public Options options;
@@ -75,6 +78,8 @@ namespace mc {
     // Player.getAbilities() -> Abilities ; Player.onUpdateAbilities()
     constexpr auto M_getAbilities      = "()Lnet/minecraft/world/entity/player/Abilities;";
     constexpr auto M_onUpdateAbilities = "()V";
+    // class descriptor for locals
+    constexpr auto AbilitiesClass = "net/minecraft/world/entity/player/Abilities";
 
     // ---- Input (record) -------------------------------------------------------
     // record Input(boolean forward, backward, left, right, jump, shift, sprint)
@@ -135,9 +140,38 @@ namespace mc {
 
     // ---- LivingEntity ----------------------------------------------------------------------
     // float getHealth()  void swing(InteractionHand)  boolean isUsingItem()
+    // AttributeInstance getAttribute(Holder<Attribute>)
     constexpr auto M_getHealth  = "()F";
     constexpr auto M_swing      = "(Lnet/minecraft/world/InteractionHand;)V";
     constexpr auto M_isUsingItem= "()Z";
+    constexpr auto M_getAttribute = "(Lnet/minecraft/core/Holder;)Lnet/minecraft/world/entity/ai/attributes/AttributeInstance;";
+
+    // ---- Attributes (static holders) ----------------------------------------------------------
+    // public static final Holder<Attribute> MOVEMENT_SPEED
+    constexpr auto F_MOVEMENT_SPEED = "MOVEMENT_SPEED";
+    constexpr auto F_MOVEMENT_SPEED_SIG = "Lnet/minecraft/core/Holder;";
+
+    // ---- AttributeInstance -----------------------------------------------------------------------
+    // double getBaseValue()  void setBaseValue(double)  double getValue()
+    constexpr auto M_getBaseValue = "()D";
+    constexpr auto M_setBaseValue = "(D)V";
+
+    // ---- Abilities fly speed (private field w/ accessors) -------------------------------------
+    // float getFlyingSpeed()  void setFlyingSpeed(float)
+    constexpr auto M_getFlyingSpeed = "()F";
+    constexpr auto M_setFlyingSpeed = "(F)V";
+
+    // ---- Entity/Player identity ------------------------------------------------------------------
+    // UUID getUUID()  ;  uuid.equals(Object) -> Z
+    constexpr auto M_getUUID = "()Ljava/util/UUID;";
+    constexpr auto M_equals  = "(Ljava/lang/Object;)Z";
+
+    // ---- Integrated-server access path ------------------------------------------------------------
+    // Minecraft.getSingleplayerServer() -> IntegratedServer
+    // MinecraftServer.getPlayerList() -> PlayerList ; PlayerList.getPlayers() -> List<ServerPlayer>
+    constexpr auto M_getSingleplayerServer = "()Lnet/minecraft/client/server/IntegratedServer;";
+    constexpr auto M_getPlayerList = "()Lnet/minecraft/server/players/PlayerList;";
+    constexpr auto M_getPlayers    = "()Ljava/util/List;";
 
     // ---- Component ------------------------------------------------------------------------------
     // static Component.literal(String) -> MutableComponent (usable as Component)

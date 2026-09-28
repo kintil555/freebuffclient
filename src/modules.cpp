@@ -49,22 +49,123 @@ namespace {
         env->DeleteLocalRef(js);
     }
 
+    // ------------------------------------------------- integrated server access
+    // Singleplayer: patch the SERVER-side player object too. The vanilla server
+    // gates flying on its own copy of abilities.mayfly (see
+    // ServerGamePacketListenerImpl.handlePlayerAbilities), so without this the
+    // server strips flight every tick -> rubber-banding/stutter.
+    jobject findServerPlayer(JNIEnv* env, jobject player) {
+        auto server = callObject(env, player, "level", "()Lnet/minecraft/world/level/Level;");
+        (void)server;
+        // Path: Minecraft.getSingleplayerServer().getPlayerList().getPlayers()
+        auto mcOpt = getStaticObject(env, mc::Minecraft, "getInstance",
+                                     "()Lnet/minecraft/client/Minecraft;");
+        if (!mcOpt || !*mcOpt) return nullptr;
+        LocalRef mc(env, *mcOpt);
+
+        auto isp = callObject(env, *mc, "getSingleplayerServer", mc::M_getSingleplayerServer);
+        if (!isp || !*isp) return nullptr;   // dedicated server / not SP
+        LocalRef srv(env, *isp);
+
+        auto plist = callObject(env, *srv, "getPlayerList", mc::M_getPlayerList);
+        if (!plist || !*plist) return nullptr;
+        LocalRef pl(env, *plist);
+
+        auto players = callObject(env, *pl, "getPlayers", mc::M_getPlayers);
+        if (!players || !*players) return nullptr;
+        LocalRef list(env, *players);
+
+        // Compare UUIDs (server player and client player are distinct objects).
+        auto myUuid = callObject(env, player, "getUUID", mc::M_getUUID);
+        if (!myUuid || !*myUuid) return nullptr;
+        LocalRef uuid(env, *myUuid);
+
+        jclass listCls = env->GetObjectClass(*list);
+        jmethodID mSize = env->GetMethodID(listCls, "size", "()I");
+        jmethodID mGet  = env->GetMethodID(listCls, "get", "(I)Ljava/lang/Object;");
+        env->DeleteLocalRef(listCls);
+        if (!mSize || !mGet) return nullptr;
+
+        const jint n = env->CallIntMethod(*list, mSize);
+        for (jint i = 0; i < n; ++i) {
+            jobject sp = env->CallObjectMethod(*list, mGet, i);
+            if (env->ExceptionCheck()) { env->ExceptionClear(); break; }
+            if (!sp) continue;
+            LocalRef spRef(env, sp);
+            auto spUuid = callObject(env, sp, "getUUID", mc::M_getUUID);
+            if (!spUuid || !*spUuid) continue;
+            LocalRef suRef(env, *spUuid);
+            if (env->CallBooleanMethod(*suRef, env->GetMethodID(
+                    env->GetObjectClass(*suRef), "equals", mc::M_equals), *uuid)) {
+                return env->NewLocalRef(sp);
+            }
+        }
+        return nullptr;
+    }
+
+    // Set mayfly+flying on a player object (client or server copy).
+    void setFlyOn(JNIEnv* env, jobject playerObj, bool on) {
+        auto ab = abilities(env, playerObj);
+        if (!ab) return;
+        LocalRef a(env, *ab);
+        if (on) {
+            setBoolField(env, *a, mc::F_mayfly, JNI_TRUE);
+            setBoolField(env, *a, mc::F_flying, JNI_TRUE);
+        } else {
+            setBoolField(env, *a, mc::F_flying, JNI_FALSE);
+            setBoolField(env, *a, mc::F_mayfly, JNI_FALSE);
+        }
+    }
+
     // ---------------------------------------------------------------- flight
+    // Rate-limited: only send the abilities packet when the state actually
+    // changes; server copy is kept in sync so it never strips flight back.
     void applyFlight(JNIEnv* env, jobject player) {
+        static bool lastOn = false;
+
         auto ab = abilities(env, player);
         if (!ab) return;
         LocalRef a(env, *ab);
-        setBoolField(env, *a, mc::F_mayfly, JNI_TRUE);
-        setBoolField(env, *a, mc::F_flying, JNI_TRUE);
-        callVoid(env, player, "onUpdateAbilities", mc::M_onUpdateAbilities);
+
+        const bool serverFlying = getBoolField(env, *a, mc::F_flying).value_or(false);
+        if (!serverFlying || !lastOn) {
+            setFlyOn(env, player, true);
+            callVoid(env, player, "onUpdateAbilities", mc::M_onUpdateAbilities);
+            lastOn = true;
+        }
+
+        // Keep the integrated server's player in sync (its mayfly must be true
+        // or handlePlayerAbilities drops our flying flag each tick).
+        if (jobject serverPlayer = findServerPlayer(env, player)) {
+            LocalRef sp(env, serverPlayer);
+            auto spAb = abilities(env, *sp);
+            if (spAb) {
+                LocalRef sa(env, *spAb);
+                const bool spMayFly = getBoolField(env, *sa, mc::F_mayfly).value_or(false);
+                const bool spFlying = getBoolField(env, *sa, mc::F_flying).value_or(false);
+                if (!spMayFly || !spFlying) {
+                    setFlyOn(env, *sp, true);
+                    // Both copies now agree, so the re-broadcast in
+                    // ServerPlayer.onUpdateAbilities() is a no-op for flight.
+                    callVoid(env, *sp, "onUpdateAbilities", mc::M_onUpdateAbilities);
+                }
+            }
+        }
     }
 
     void unflight(JNIEnv* env, jobject player) {
-        auto ab = abilities(env, player);
-        if (!ab) return;
-        LocalRef a(env, *ab);
-        setBoolField(env, *a, mc::F_flying, JNI_FALSE);
-        callVoid(env, player, "onUpdateAbilities", mc::M_onUpdateAbilities);
+        static bool sent = false;
+        if (!sent) {
+            setFlyOn(env, player, false);
+            callVoid(env, player, "onUpdateAbilities", mc::M_onUpdateAbilities);
+            // Also clear on the server copy.
+            if (jobject sp = findServerPlayer(env, player)) {
+                LocalRef s(env, sp);
+                setFlyOn(env, *s, false);
+                callVoid(env, *s, "onUpdateAbilities", mc::M_onUpdateAbilities);
+            }
+            sent = true;
+        }
     }
 
     // ------------------------------------------------------------ kill aura
@@ -206,6 +307,77 @@ namespace {
         const bool fwd = getBoolField(env, *k, mc::F_in_forward).value_or(false);
         if (!fwd) return;
         callVoid(env, player, "setSprinting", mc::M_setSprinting, JNI_TRUE);
+    }
+
+    // ---------------------------------------------------------------- speed
+    // Speed via the movement_speed attribute base value. The attribute is
+    // server-synced, so this works cleanly in singleplayer (integrated server
+    // reads the same attribute from its ServerPlayer, and our server-side sync
+    // below keeps both copies matching).
+    void applySpeed(JNIEnv* env, jobject player) {
+        static double originalSpeed = -1.0;
+        static float  lastAppliedMult = -1.f;
+        static bool   wasFlightSpeed = false;
+
+        // Resolve the MOVEMENT_SPEED attribute holder (static field).
+        auto holderOpt = getStaticObjectField(env, mc::Attributes, mc::F_MOVEMENT_SPEED,
+                                              mc::F_MOVEMENT_SPEED_SIG);
+        if (!holderOpt || !*holderOpt) return;
+        LocalRef holder(env, *holderOpt);
+
+        auto instOpt = callObject(env, player, "getAttribute", mc::M_getAttribute, *holder);
+        if (!instOpt || !*instOpt) return;
+        LocalRef inst(env, *instOpt);
+
+        if (g.speed) {
+            if (originalSpeed < 0.0) {
+                originalSpeed = callDouble(env, *inst, "getBaseValue", mc::M_getBaseValue).value_or(0.0);
+                // While flying the effective speed comes from abilities.flyingSpeed,
+                // so scale that instead of the attribute.
+                auto ab = abilities(env, player);
+                wasFlightSpeed = false;
+                if (ab) {
+                    LocalRef a(env, *ab);
+                    wasFlightSpeed = getBoolField(env, *a, mc::F_flying).value_or(false);
+                }
+            }
+            const float mult = std::clamp(g.speedMultiplier, 1.05f, 4.f);
+            if (lastAppliedMult != mult) {
+                if (wasFlightSpeed) {
+                    if (auto ab = abilities(env, player)) {
+                        LocalRef a(env, *ab);
+                        jclass abCls = env->GetObjectClass(*a);
+                        if (jmethodID sm = env->GetMethodID(abCls, "setFlyingSpeed", mc::M_setFlyingSpeed)) {
+                            env->CallVoidMethod(*a, sm, 0.05f * mult);
+                            if (env->ExceptionCheck()) env->ExceptionClear();
+                        }
+                        env->DeleteLocalRef(abCls);
+                    }
+                } else {
+                    callVoid(env, *inst, "setBaseValue", mc::M_setBaseValue,
+                             originalSpeed * mult);
+                }
+                lastAppliedMult = mult;
+            }
+        } else if (originalSpeed >= 0.0) {
+            // Restore.
+            if (wasFlightSpeed) {
+                if (auto ab = abilities(env, player)) {
+                    LocalRef a(env, *ab);
+                    jclass abCls = env->GetObjectClass(*a);
+                    if (jmethodID sm = env->GetMethodID(abCls, "setFlyingSpeed", mc::M_setFlyingSpeed)) {
+                        env->CallVoidMethod(*a, sm, 0.05f);
+                        if (env->ExceptionCheck()) env->ExceptionClear();
+                    }
+                    env->DeleteLocalRef(abCls);
+                }
+            } else {
+                callVoid(env, *inst, "setBaseValue", mc::M_setBaseValue, originalSpeed);
+            }
+            originalSpeed = -1.0;
+            lastAppliedMult = -1.f;
+            wasFlightSpeed = false;
+        }
     }
 
     // ------------------------------------------------------------ fullbright
@@ -530,6 +702,8 @@ void onClientTick(void* envPtr, void* mcObj) {
     LocalRef level(env, *levelOpt);
 
     if (g.flight)        applyFlight(env, *player);
+    else                 unflight(env, *player);   // edge-triggered restore
+    if (g.speed)         applySpeed(env, *player);
     if (g.noFall)        applyNoFall(env, *player);
     if (g.velocity)      applyVelocity(env, *player);
     if (g.killAura)      doKillAura(env, *mc, *player, *level);

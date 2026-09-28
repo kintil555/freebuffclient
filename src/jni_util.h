@@ -101,6 +101,17 @@ namespace jni {
         return r;
     }
 
+    inline std::optional<jobject> getStaticObjectField(JNIEnv* env, const char* cls, const char* field, const char* sig) {
+        auto c = findClass(env, cls);
+        if (!c) return std::nullopt;
+        jfieldID f = env->GetStaticFieldID(*c, field, sig);
+        if (!f || env->ExceptionCheck()) { env->ExceptionClear(); env->DeleteLocalRef(*c); return std::nullopt; }
+        jobject r = env->GetStaticObjectField(*c, f);
+        if (env->ExceptionCheck()) { env->ExceptionClear(); env->DeleteLocalRef(*c); return std::nullopt; }
+        env->DeleteLocalRef(*c);
+        return r;
+    }
+
     inline std::optional<jobject> getObjectField(JNIEnv* env, jobject obj, const char* field, const char* sig) {
         if (!env || !obj) return std::nullopt;
         jclass c = env->GetObjectClass(obj);
