@@ -48,7 +48,7 @@ target_link_libraries(nova PRIVATE imgui opengl32 dwmapi user32 gdi32 shell32)
 target_compile_definitions(nova PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
 # Keep code size sane; strip RTTI/exceptions where possible? Keep exceptions ON
 # (std::thread + STL use them).
-target_compile_options(nova PRIVATE /EHsc /W3)
+target_compile_options(nova PRIVATE /EHsc /W3 /utf-8)
 
 set_target_properties(nova PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
@@ -61,7 +61,7 @@ add_executable(nova_injector
 )
 target_link_libraries(nova_injector PRIVATE dwmapi user32 gdi32 msimg32)
 target_compile_definitions(nova_injector PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
-target_compile_options(nova_injector PRIVATE /EHsc /W3)
+target_compile_options(nova_injector PRIVATE /EHsc /W3 /utf-8)
 # GUI subsystem + Unicode entry: the injector uses wWinMain, not main.
 set_target_properties(nova_injector PROPERTIES WIN32_EXECUTABLE TRUE)
 target_link_options(nova_injector PRIVATE "/ENTRY:wWinMainCRTStartup")

@@ -30,7 +30,9 @@ namespace {
     bool g_toggleQueued = false;
 
     LRESULT WINAPI wndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
-        if (msg == WM_KEYDOWN && wParam == VK_INSERT) g_toggleQueued = true;
+        // Right Shift toggles the menu (scancode 0x36 distinguishes it from left Shift).
+        if (msg == WM_KEYDOWN && wParam == VK_SHIFT &&
+            ((lParam >> 16) & 0xFF) == 0x36) g_toggleQueued = true;
         if (g_initialized && g_menuOpen) {
             if (ImGui_ImplWin32_WndProcHandler(hWnd, msg, wParam, lParam)) return 0;
             // Swallow game input while the menu is up.
@@ -442,10 +444,10 @@ namespace ui {
 
         ImGuiIO& io = ImGui::GetIO();
 
-        // ---- menu toggle (Insert) ----
-        const bool insNow = (GetAsyncKeyState(VK_INSERT) & 0x8000) != 0;
-        if (insNow && !g_prevInsert) g_menuOpen = !g_menuOpen;
-        g_prevInsert = insNow;
+        // ---- menu toggle (Right Shift) ----
+        const bool rsNow = (GetAsyncKeyState(VK_RSHIFT) & 0x8000) != 0;
+        if (rsNow && !g_prevInsert) g_menuOpen = !g_menuOpen;
+        g_prevInsert = rsNow;
         if (g_toggleQueued) { g_menuOpen = !g_menuOpen; g_toggleQueued = false; }
 
         // ---- open/close animation (smoothstep) ----

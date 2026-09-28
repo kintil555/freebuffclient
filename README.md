@@ -13,19 +13,14 @@ Mojang class names and we talk to it directly over JNI.
 ## Build
 
 Everything builds on GitHub Actions (MSVC, windows-latest). Push to `main` and grab the
-`nova-26.2-win64` artifact — it contains:
+`nova-26.2-win64` artifact from the Actions run — it contains:
 
 ```
 nova.dll
 nova_injector.exe
 ```
 
-Local build (needs Visual Studio 2022 + CMake):
-
-```powershell
-cmake -S . -B build -G "Visual Studio 17 2022" -A x64
-cmake --build build --config Release
-```
+No local toolchain needed — all compilation happens in CI.
 
 ## Use
 

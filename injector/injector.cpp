@@ -26,6 +26,11 @@ namespace fs = std::filesystem;
 static const wchar_t WC_MAIN[] = L"NoNovaMain";
 static const wchar_t WC_BTN[]  = L"NoNovaButton";
 
+// Shared card layout so paint() and button placement never disagree.
+static const LONG CARD_W = 420, CARD_H = 300;
+static const LONG BTN_W = 200, BTN_H = 52, BTN_DY = 128;   // button offset inside card
+static const LONG STATUS_DY = 96, PROGRESS_DY = 192;        // text/progress offsets inside card
+
 static HWND g_hwnd       = nullptr;
 static HWND g_btn        = nullptr;
 static float g_time      = 0.f;
@@ -159,9 +164,9 @@ static void paint(HDC dc, RECT rc) {
                       BYTE(160 + 40 * std::sin(t * 1.2 + 3.f)));
 
     // Card
-    const LONG cx = (rc.right - rc.left) / 2, cy = (rc.bottom - rc.top) / 2;
-    const LONG cw = 420, ch = 240;
-    const LONG x0 = cx - cw / 2, y0 = cy - ch / 2;
+    const LONG cx = (rc.right - rc.left) / 2;
+    const LONG cw = CARD_W, ch = CARD_H;
+    const LONG x0 = cx - cw / 2, y0 = ((rc.bottom - rc.top) - ch) / 2;
 
     // Soft outer glow: several expanding rounded rects, fading alpha.
     for (int i = 6; i >= 1; --i) {
@@ -180,20 +185,20 @@ static void paint(HDC dc, RECT rc) {
     GRADIENT_RECT g2{ 0, 1 };
     GradientFill(dc, tv2, 2, &g2, 1, GRADIENT_FILL_RECT_H);
 
-    drawTextC(dc, L"NOVA", cx, y0 + 36, 34, RGB(240, 234, 255));
-    drawTextC(dc, g_status.c_str(), cx, y0 + 96, 16, RGB(170, 160, 200));
+    drawTextC(dc, L"NOVA", cx, y0 + 40, 34, RGB(240, 234, 255));
+    drawTextC(dc, g_status.c_str(), cx, y0 + STATUS_DY, 16, RGB(170, 160, 200));
 
-    // Progress bar under status (animated width).
+    // Progress bar under the button (animated width).
     if (g_state == 1) {
-        const LONG bw = 260, bx = cx - bw / 2, by = y0 + 122;
+        const LONG bw = 260, bx = cx - bw / 2, by = y0 + PROGRESS_DY;
         fillRound(dc, bx, by, bw, 6, 3, RGB(35, 26, 54), 255);
         const float eased = g_progress < 1.f ? (1.f - std::pow(1.f - g_progress, 2.f)) : 1.f;
         fillRound(dc, bx, by, LONG(bw * eased), 6, 3, c1, 255);
     }
 
     // Footer hint.
-    drawTextC(dc, L"Insert toggles the menu in-game  ·  built for 26.2",
-              cx, y0 + ch - 22, 13, RGB(120, 110, 150));
+    drawTextC(dc, L"Right Shift toggles the menu in-game  ·  built for 26.2",
+              cx, y0 + ch - 24, 13, RGB(120, 110, 150));
 }
 
 // ---- button window ---------------------------------------------------------
@@ -225,7 +230,7 @@ static void paintButton(HDC dc, RECT rc) {
     fillRound(dc, shrink, shrink + (h - shrink * 2) / 2, w - shrink * 2, (h - shrink * 2) / 2, 20, cB, 120);
 
     drawTextC(dc, g_state == 1 ? L"injecting…" : g_state == 2 ? L"injected ✓"
-             : g_state == 3 ? L"failed — click to retry" : L"inject",
+             : g_state == 3 ? L"retry" : L"inject",
              w / 2, h / 2, 20, RGB(255, 255, 255));
 
     // Progress ring while working: arc along the border.
@@ -299,9 +304,10 @@ static LRESULT CALLBACK mainProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     switch (msg) {
         case WM_CREATE: {
             RECT rc; GetClientRect(hwnd, &rc);
-            const LONG bw = 200, bh = 52;
+            // Button lives inside the card: y0 + BTN_DY (same math as paint()).
+            const LONG y0 = ((rc.bottom - rc.top) - CARD_H) / 2;
             g_btn = CreateWindowExW(0, WC_BTN, L"", WS_CHILD | WS_VISIBLE,
-                                    (rc.right - bw) / 2, 120, bw, bh,
+                                    (rc.right - BTN_W) / 2, y0 + BTN_DY, BTN_W, BTN_H,
                                     hwnd, nullptr, nullptr, nullptr);
             // Rounded corners (Win11); harmless no-op on Win10.
             DWM_WINDOW_CORNER_PREFERENCE pref = DWMWCP_ROUND;
@@ -358,7 +364,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nCmdShow) {
     wb.hbrBackground = nullptr;
     RegisterClassExW(&wb);
 
-    const LONG ww = 520, wh = 360;
+    const LONG ww = 520, wh = 420;
     RECT work{};
     SystemParametersInfoW(SPI_GETWORKAREA, 0, &work, 0);
     const LONG wx = work.left + ((work.right - work.left) - ww) / 2;
