@@ -1,0 +1,12 @@
+build/
+dist/
+out/
+_mcjar/
+_decomp/
+_tools/
+*.user
+.vs/
+*.aps
+
+# editor/agent metadata
+.freebuff/
