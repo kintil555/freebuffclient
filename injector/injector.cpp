@@ -115,7 +115,10 @@ static bool inject(DWORD pid, const wstring& dllPath, wstring& err) {
         return false;
     }
 
-    const wchar_t* dllName = dllPath.filename().c_str();
+    // Extract the module filename (e.g. "nova.dll") from the full path.
+    wstring dllName = dllPath;
+    const size_t slash = dllName.find_last_of(L"/\\");
+    if (slash != wstring::npos) dllName = dllName.substr(slash + 1);
 
     SIZE_T size = (dllPath.size() + 1) * sizeof(wchar_t);
     LPVOID remote = VirtualAllocEx(hProc, nullptr, size, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
@@ -151,7 +154,7 @@ static bool inject(DWORD pid, const wstring& dllPath, wstring& err) {
 
     // Confirm the module actually mapped into the game.
     for (int i = 0; i < 20; ++i) {
-        if (dllLoadedIn(pid, dllName)) return true;
+        if (dllLoadedIn(pid, dllName.c_str())) return true;
         Sleep(100);
     }
     err = L"dll did not appear in the game's module list";
