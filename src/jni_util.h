@@ -101,6 +101,29 @@ namespace jni {
         return r;
     }
 
+    // Read a private field via reflection (setAccessible) — used only where no
+    // accessor exists (e.g. MultiPlayerGameMode.destroyDelay).
+    inline std::optional<jint> getIntFieldReflective(JNIEnv* env, jobject obj, const char* field) {
+        if (!env || !obj) return std::nullopt;
+        jclass c = env->GetObjectClass(obj);
+        if (!c) return std::nullopt;
+        jfieldID f = env->GetFieldID(c, field, "I");
+        if (!f || env->ExceptionCheck()) { env->ExceptionClear(); env->DeleteLocalRef(c); return std::nullopt; }
+        jint r = env->GetIntField(obj, f);
+        env->DeleteLocalRef(c);
+        return r;
+    }
+
+    inline void setIntFieldReflective(JNIEnv* env, jobject obj, const char* field, jint v) {
+        if (!env || !obj) return;
+        jclass c = env->GetObjectClass(obj);
+        if (!c) return;
+        jfieldID f = env->GetFieldID(c, field, "I");
+        if (!f || env->ExceptionCheck()) { env->ExceptionClear(); env->DeleteLocalRef(c); return; }
+        env->SetIntField(obj, f, v);
+        env->DeleteLocalRef(c);
+    }
+
     inline std::optional<jobject> getStaticObjectField(JNIEnv* env, const char* cls, const char* field, const char* sig) {
         auto c = findClass(env, cls);
         if (!c) return std::nullopt;

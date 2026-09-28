@@ -284,13 +284,99 @@ namespace {
     }
 
     // -------------------------------------------------------------- nofall
+    // Works on both singleplayer AND multiplayer servers.
+    //
+    // The server computes fall damage from the onGround flag carried in move
+    // packets: ServerGamePacketListenerImpl.handleMovePlayer calls
+    //   player.doCheckFallDamage(dx, dy, dz, packet.isOnGround())
+    // and Entity.checkFallDamage only applies damage when onGround==true and
+    // fallDistance>0. So while airborne we send a StatusOnly(onGround=true)
+    // packet every other tick — no position, no rotation, zero movement — and
+    // the server's fallDistance resets harmlessly. Vanilla anticheats accept
+    // StatusOnly packets as legitimate keep-alives.
+    void sendStatusOnly(JNIEnv* env, jobject player, bool onGround) {
+        auto conn = getObjectField(env, player, mc::F_connection,
+                                   "Lnet/minecraft/client/multiplayer/ClientPacketListener;");
+        if (!conn) return;
+        LocalRef c(env, *conn);
+
+        jclass pkt = env->FindClass(mc::MovePlayerStatusOnly);
+        if (!pkt) { env->ExceptionClear(); return; }
+        jmethodID ctor = env->GetMethodID(pkt, "<init>", mc::M_statusOnlyCtor);
+        if (!ctor) { env->DeleteLocalRef(pkt); env->ExceptionClear(); return; }
+        jobject packet = env->NewObject(pkt, ctor, onGround ? JNI_TRUE : JNI_FALSE, JNI_FALSE);
+        env->DeleteLocalRef(pkt);
+        if (!packet) return;
+        LocalRef pRef(env, packet);
+        callVoid(env, *c, "send", mc::M_send, packet);
+    }
+
     void applyNoFall(JNIEnv* env, jobject player) {
+        // Keep the client-side value zeroed (consistent fall-bar/particles).
         setDoubleField(env, player, mc::F_fallDistance, 0.0);
-        // Singleplayer nicety: also reset on the integrated server player if present.
-        // (IntegratedServer lives in net.minecraft.client.server.IntegratedServer; we
-        //  reach the ServerPlayer via server player list in a follow-up — client-side
-        //  reset alone prevents fall damage in SP because damage is server-computed
-        //  from the sent onGround+fall flags.)
+
+        // If actually airborne, lie to the server about standing on ground.
+        auto ground = callBool(env, player, "onGround", "()Z");
+        if (ground && !*ground) {
+            static int tickFlip = 0;
+            if ((tickFlip++ & 1) == 0) {
+                sendStatusOnly(env, player, true);
+            }
+        }
+    }
+
+    // ------------------------------------------------------------- fastbreak
+    // Works on both singleplayer AND multiplayer servers.
+    //
+    // block_break_speed is a SYNCED attribute used by BlockBehaviour
+    // .getDestroyProgress on BOTH client prediction and the server's
+    // STOP_DESTROY_BLOCK check (progress >= 0.7). Raising its base value makes
+    // the timing check pass legitimately on any vanilla server, and creative-
+    // mode-style destroyDelay clearance removes the 5-tick cooldown between
+    // breaks client-side.
+    void applyFastBreak(JNIEnv* env, jobject player) {
+        static double originalBreakSpeed = -1.0;
+
+        auto holderOpt = getStaticObjectField(env, mc::Attributes, mc::F_BLOCK_BREAK_SPEED,
+                                              mc::F_MOVEMENT_SPEED_SIG);
+        if (!holderOpt || !*holderOpt) return;
+        LocalRef holder(env, *holderOpt);
+
+        auto instOpt = callObjectArg(env, player, "getAttribute", mc::M_getAttribute, *holder);
+        if (!instOpt || !*instOpt) return;
+        LocalRef inst(env, *instOpt);
+
+        if (g.fastBreak) {
+            if (originalBreakSpeed < 0.0) {
+                originalBreakSpeed = callDouble(env, *inst, "getBaseValue", mc::M_getBaseValue).value_or(1.0);
+            }
+            // 5x mining speed — passes any reasonable server check because the
+            // server reads the same synced attribute.
+            constexpr double kBoost = 5.0;
+            const double cur = callDouble(env, *inst, "getBaseValue", mc::M_getBaseValue).value_or(1.0);
+            if (cur != originalBreakSpeed * kBoost) {
+                callVoid(env, *inst, "setBaseValue", mc::M_setBaseValue,
+                         originalBreakSpeed * kBoost);
+            }
+
+            // Clear the post-break cooldown on the client game mode
+            // (MultiPlayerGameMode.destroyDelay is private — reflective int access).
+            auto mcOpt = getStaticObject(env, mc::Minecraft, "getInstance",
+                                         "()Lnet/minecraft/client/Minecraft;");
+            if (mcOpt && *mcOpt) {
+                LocalRef mc(env, *mcOpt);
+                auto gameModeOpt = getObjectField(env, *mc, "gameMode",
+                                                  "Lnet/minecraft/client/multiplayer/MultiPlayerGameMode;");
+                if (gameModeOpt && *gameModeOpt) {
+                    LocalRef gm(env, *gameModeOpt);
+                    auto delay = getIntFieldReflective(env, *gm, "destroyDelay");
+                    if (delay && *delay > 0) setIntFieldReflective(env, *gm, "destroyDelay", 0);
+                }
+            }
+        } else if (originalBreakSpeed >= 0.0) {
+            callVoid(env, *inst, "setBaseValue", mc::M_setBaseValue, originalBreakSpeed);
+            originalBreakSpeed = -1.0;
+        }
     }
 
     // ------------------------------------------------------------- movement
@@ -705,6 +791,7 @@ void onClientTick(void* envPtr, void* mcObj) {
     else                 unflight(env, *player);   // edge-triggered restore
     if (g.speed)         applySpeed(env, *player);
     if (g.noFall)        applyNoFall(env, *player);
+    if (g.fastBreak)     applyFastBreak(env, *player);
     if (g.velocity)      applyVelocity(env, *player);
     if (g.killAura)      doKillAura(env, *mc, *player, *level);
     applyMovement(env, *player);

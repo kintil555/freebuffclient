@@ -131,7 +131,8 @@ namespace mc {
 
     // ---- ClientPacketListener (extends ClientCommonPacketListenerImpl) -----------------
     // void send(Packet)  void sendChat(String)  void sendCommand(String)
-    constexpr auto M_send      = "(Lnet/minecraft/network/packet/Packet;)V";
+    // NOTE: Packet lives in net.minecraft.network.protocol (verified in 26.2).
+    constexpr auto M_send      = "(Lnet/minecraft/network/protocol/Packet;)V";
     constexpr auto M_sendChat  = "(Ljava/lang/String;)V";
 
     // ---- MultiPlayerGameMode -------------------------------------------------------------
@@ -147,9 +148,29 @@ namespace mc {
     constexpr auto M_getAttribute = "(Lnet/minecraft/core/Holder;)Lnet/minecraft/world/entity/ai/attributes/AttributeInstance;";
 
     // ---- Attributes (static holders) ----------------------------------------------------------
-    // public static final Holder<Attribute> MOVEMENT_SPEED
+    // public static final Holder<Attribute> MOVEMENT_SPEED / BLOCK_BREAK_SPEED
     constexpr auto F_MOVEMENT_SPEED = "MOVEMENT_SPEED";
     constexpr auto F_MOVEMENT_SPEED_SIG = "Lnet/minecraft/core/Holder;";
+    constexpr auto F_BLOCK_BREAK_SPEED = "BLOCK_BREAK_SPEED";
+
+    // ---- Move-player packet (for packet-level NoFall) ------------------------------------------
+    constexpr auto MovePlayerStatusOnly = "net/minecraft/network/protocol/game/ServerboundMovePlayerPacket$StatusOnly";
+    // StatusOnly(boolean onGround, boolean horizontalCollision)
+    constexpr auto M_statusOnlyCtor = "(ZZ)V";
+    constexpr auto PlayerActionClass = "net/minecraft/network/protocol/game/ServerboundPlayerActionPacket";
+    // ServerboundPlayerActionPacket(Action, BlockPos, Direction)
+    constexpr auto M_actionCtor = "(Lnet/minecraft/network/protocol/game/ServerboundPlayerActionPacket$Action;Lnet/minecraft/core/BlockPos;Lnet/minecraft/core/Direction;)V";
+    constexpr auto ActionClass  = "net/minecraft/network/protocol/game/ServerboundPlayerActionPacket$Action";
+    constexpr auto F_ActionStopDestroy = "STOP_DESTROY_BLOCK";
+    constexpr auto BlockPosClass = "net/minecraft/core/BlockPos";
+    constexpr auto M_blockPosCtor = "(III)V";
+    constexpr auto DirectionClass = "net/minecraft/core/Direction";
+    constexpr auto F_DirectionDown = "DOWN";
+
+    // ---- MultiPlayerGameMode (FastBreak helpers) ------------------------------------------------
+    // private float destroyProgress; private int destroyDelay; public final ClientPacketListener connection;
+    // MultiPlayerGameMode has getDestroyStage() public; fields are private -> use accessors we add via
+    // getObjectField on declared fields (works with setAccessible through JNI).;
 
     // ---- AttributeInstance -----------------------------------------------------------------------
     // double getBaseValue()  void setBaseValue(double)  double getValue()
